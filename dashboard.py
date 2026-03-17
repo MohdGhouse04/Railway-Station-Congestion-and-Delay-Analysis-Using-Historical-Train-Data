@@ -1,8 +1,3 @@
-"""
-Railway Station Congestion & Delay Analysis — Streamlit Dashboard
-Streamlit Cloud version — loads models directly (no Flask API needed)
-"""
-
 import os, pickle, numpy as np, pandas as pd
 import streamlit as st
 import plotly.express as px
@@ -33,7 +28,8 @@ def load_models():
     for k, f in keys.items():
         p = os.path.join(mdir, f)
         if os.path.exists(p):
-            with open(p,'rb') as fh: m[k] = pickle.load(fh)
+            with open(p,'rb') as fh:
+                m[k] = pickle.load(fh)
         else:
             missing.append(f)
     return m, missing
@@ -53,18 +49,20 @@ def load_data():
     return None, 'CSV not found. Add etrain_delays.csv to the project folder.'
 
 def run_predict(m, rt, sl, sig, can, s_avg=None, s_max=None, s_std=None, t_cnt=None, t_avg=None):
-    s_avg = s_avg or STATS['s_avg']; s_max = s_max or STATS['s_max']
-    s_std = s_std or STATS['s_std']; t_cnt = t_cnt or STATS['t_cnt']
+    s_avg = s_avg or STATS['s_avg']
+    s_max = s_max or STATS['s_max']
+    s_std = s_std or STATS['s_std']
+    t_cnt = t_cnt or STATS['t_cnt']
     t_avg = t_avg or STATS['t_avg']
-    avg_d  = 100 - rt
-    ci_n   = min((avg_d + sig + can) / STATS['ci_max'], 1.0)
-    dss_n  = min((0.5*avg_d + 0.3*sig + 0.2*can) / 100, 1.0) * 100
-    vec    = np.array([[rt, sl, sig, can, ci_n, sig+can, 100-rt, dss_n,
-                        s_avg, s_max, s_std, t_cnt, t_avg, sl/(sig+1e-5)]])
-    delay  = float(m['reg'].predict(vec)[0])
-    cls    = m['le'].inverse_transform([int(m['cls'].predict(vec)[0])])[0]
-    ci_raw = int(m['kmeans'].predict(m['scaler_k'].transform([[avg_d,sig,can]]))[0])
-    clust  = {0:'Low Congestion',1:'Medium Congestion',2:'High Congestion'}.get(ci_raw,'Unknown')
+    avg_d = 100 - rt
+    ci_n  = min((avg_d + sig + can) / STATS['ci_max'], 1.0)
+    dss_n = min((0.5*avg_d + 0.3*sig + 0.2*can) / 100, 1.0) * 100
+    vec   = np.array([[rt, sl, sig, can, ci_n, sig+can, 100-rt, dss_n,
+                       s_avg, s_max, s_std, t_cnt, t_avg, sl/(sig+1e-5)]])
+    delay = float(m['reg'].predict(vec)[0])
+    cls   = m['le'].inverse_transform([int(m['cls'].predict(vec)[0])])[0]
+    cr    = int(m['kmeans'].predict(m['scaler_k'].transform([[avg_d,sig,can]]))[0])
+    clust = {0:'Low Congestion',1:'Medium Congestion',2:'High Congestion'}.get(cr,'Unknown')
     c = 0 if ci_n<.33 else (1 if ci_n<.66 else 2)
     s = 0 if dss_n<33  else (1 if dss_n<66  else 2)
     rl = ACTIONS[int(np.argmax(m['Q_table'][c][s]))]
@@ -74,21 +72,26 @@ def run_predict(m, rt, sl, sig, can, s_avg=None, s_max=None, s_std=None, t_cnt=N
 models, merr = load_models()
 OK = len(merr) == 0
 
-# ── Sidebar ──────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 🚂 Railway Analysis")
     st.markdown("---")
-    st.success("Models loaded ✓") if OK else st.error(f"Missing: {', '.join(merr)}")
+    if OK:
+        st.success("Models loaded ✓")
+    else:
+        st.error("Missing models")
+        for e in merr:
+            st.caption(f"• {e}")
     st.markdown("---")
-    page = st.radio("Navigate",
-        ["Live Prediction","Data Explorer","Station Analysis","Model Performance"],
-        label_visibility="collapsed")
+    page = st.radio(
+        "Navigate",
+        ["Live Prediction", "Data Explorer", "Station Analysis", "Model Performance"],
+        label_visibility="collapsed"
+    )
     st.markdown("---")
     st.caption("Railway Station Congestion Analysis")
     st.caption("Team: Gnyaneshwari · Akash · Upendra")
     st.caption("Guide: Dr. L.T. Hemalatha")
 
-# ════════════════════════════════════════════════════════════════════
 if page == "Live Prediction":
     st.title("Live Delay Prediction")
     st.markdown("Enter station statistics to get real-time predictions from the trained ML models.")
@@ -96,11 +99,14 @@ if page == "Live Prediction":
     with c1:
         st.subheader("Station Input")
         rt  = st.slider("% Trains on time",          0, 100, 65)
-        sl  = st.slider("% Slight delay (1–15 min)", 0, 100, 20)
+        sl  = st.slider("% Slight delay (1-15 min)", 0, 100, 20)
         sig = st.slider("% Significant delay",       0, 100, 10)
         can = st.slider("% Cancelled / unknown",     0, 100,  5)
         tot = rt+sl+sig+can
-        st.warning(f"Total: {tot}% — should be ~100%") if tot>101 else st.caption(f"Total: {tot}%")
+        if tot > 101:
+            st.warning(f"Total: {tot}% — should be ~100%")
+        else:
+            st.caption(f"Total: {tot}%")
         with st.expander("Advanced inputs (improves accuracy)"):
             s_avg = st.number_input("Station avg delay (min)", 0.0, 600.0, 38.5)
             s_max = st.number_input("Station max delay (min)", 0.0, 600.0, 180.0)
@@ -120,13 +126,14 @@ if page == "Live Prediction":
                 <h3 style="margin:0 0 4px 0">Predicted Delay: {r['delay']} min</h3>
                 <p style="margin:0;font-size:14px;opacity:.75">Class: <strong>{r['cls']}</strong></p>
             </div>""", unsafe_allow_html=True)
-            a,b = st.columns(2)
+            a, b = st.columns(2)
             a.metric("Congestion Index", f"{r['ci']:.2f}")
             b.metric("Severity Score",   f"{r['sev']:.1f}/100")
-            a2,b2 = st.columns(2)
+            a2, b2 = st.columns(2)
             a2.metric("Cluster", r['cluster'].replace(" Congestion",""))
             b2.metric("RL Action", r['rl'])
-            fig = go.Figure(go.Indicator(mode="gauge+number", value=r['sev'],
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number", value=r['sev'],
                 title={"text":"Delay Severity Score","font":{"size":14}},
                 gauge={"axis":{"range":[0,100]},"bar":{"color":"#1d4ed8"},
                        "steps":[{"range":[0,33],"color":"#dcfce7"},
@@ -134,7 +141,8 @@ if page == "Live Prediction":
                                  {"range":[66,100],"color":"#fee2e2"}]}))
             fig.update_layout(height=220, margin=dict(t=40,b=0,l=20,r=20))
             st.plotly_chart(fig, use_container_width=True)
-            ac = {"Maintain Schedule":"#f0fdf4","Add Platform":"#fefce8","Prioritize Train":"#fff1f2"}.get(r['rl'],"#f8fafc")
+            ac = {"Maintain Schedule":"#f0fdf4","Add Platform":"#fefce8",
+                  "Prioritize Train":"#fff1f2"}.get(r['rl'],"#f8fafc")
             st.markdown(f"""<div style="background:{ac};border-radius:10px;padding:1rem;">
                 <strong>RL Recommendation:</strong> {r['rl']}<br>
                 <small style="opacity:.7">Based on trained Q-learning agent</small>
@@ -142,42 +150,49 @@ if page == "Live Prediction":
         else:
             st.info("Adjust the sliders and click **Predict Now**")
 
-# ════════════════════════════════════════════════════════════════════
 elif page == "Data Explorer":
     st.title("Data Explorer")
     df, err = load_data()
-    if err: st.error(err); st.stop()
+    if err:
+        st.error(err)
+        st.stop()
     m1,m2,m3,m4 = st.columns(4)
     m1.metric("Total Records",   f"{len(df):,}")
     m2.metric("Unique Stations", f"{df['station_name'].nunique():,}")
     m3.metric("Unique Trains",   f"{df['train_number'].nunique():,}")
     m4.metric("Avg Delay",       f"{df['average_delay_minutes'].mean():.1f} min")
     st.markdown("---")
-    c1,c2 = st.columns(2)
+    c1, c2 = st.columns(2)
     with c1:
         st.subheader("Delay distribution")
         fig = px.histogram(df, x="average_delay_minutes", nbins=40,
-            color_discrete_sequence=["#3b82f6"], labels={"average_delay_minutes":"Delay (min)"})
+            color_discrete_sequence=["#3b82f6"],
+            labels={"average_delay_minutes":"Delay (min)"})
         fig.update_layout(height=280, margin=dict(t=10,b=40,l=40,r=10), showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
     with c2:
         st.subheader("Delay class breakdown")
         cnt = df["Delay_Class"].value_counts()
         fig = px.pie(values=cnt.values, names=cnt.index, hole=0.4,
-            color=cnt.index, color_discrete_map={"Low":"#22c55e","Medium":"#f59e0b","High":"#ef4444"})
+            color=cnt.index,
+            color_discrete_map={"Low":"#22c55e","Medium":"#f59e0b","High":"#ef4444"})
         fig.update_layout(height=280, margin=dict(t=10,b=10,l=10,r=10))
         st.plotly_chart(fig, use_container_width=True)
-    c3,c4 = st.columns(2)
+    c3, c4 = st.columns(2)
     with c3:
         st.subheader("On-time % vs avg delay")
-        fig = px.scatter(df, x="pct_right_time", y="average_delay_minutes", color="Delay_Class",
-            color_discrete_map={"Low":"#22c55e","Medium":"#f59e0b","High":"#ef4444"}, opacity=0.5)
+        fig = px.scatter(df, x="pct_right_time", y="average_delay_minutes",
+            color="Delay_Class",
+            color_discrete_map={"Low":"#22c55e","Medium":"#f59e0b","High":"#ef4444"},
+            opacity=0.5)
         fig.update_layout(height=280, margin=dict(t=10,b=40,l=40,r=10))
         st.plotly_chart(fig, use_container_width=True)
     with c4:
         st.subheader("Significant delay vs cancelled")
-        fig = px.scatter(df, x="pct_significant_delay", y="pct_cancelled_unknown", color="Delay_Class",
-            color_discrete_map={"Low":"#22c55e","Medium":"#f59e0b","High":"#ef4444"}, opacity=0.5)
+        fig = px.scatter(df, x="pct_significant_delay", y="pct_cancelled_unknown",
+            color="Delay_Class",
+            color_discrete_map={"Low":"#22c55e","Medium":"#f59e0b","High":"#ef4444"},
+            opacity=0.5)
         fig.update_layout(height=280, margin=dict(t=10,b=40,l=40,r=10))
         st.plotly_chart(fig, use_container_width=True)
     st.markdown("---")
@@ -189,11 +204,12 @@ elif page == "Data Explorer":
     st.dataframe(sd.reset_index(drop=True), use_container_width=True, height=300)
     st.caption(f"Showing {len(sd):,} records")
 
-# ════════════════════════════════════════════════════════════════════
 elif page == "Station Analysis":
     st.title("Station Analysis")
     df, err = load_data()
-    if err: st.error(err); st.stop()
+    if err:
+        st.error(err)
+        st.stop()
     sdf = (df.groupby("station_name")
              .agg(avg_delay=("average_delay_minutes","mean"),
                   max_delay=("average_delay_minutes","max"),
@@ -201,11 +217,13 @@ elif page == "Station Analysis":
                   congestion=("Congestion_Index","mean"),
                   train_count=("train_number","count"))
              .round(2).reset_index())
-    ca,cb = st.columns([2,1])
-    with ca: top_n = st.slider("Show top N stations", 5, 30, 10)
-    with cb: sb = st.selectbox("Sort by", ["avg_delay","congestion","max_delay","pct_ontime"])
+    ca, cb = st.columns([2,1])
+    with ca:
+        top_n = st.slider("Show top N stations", 5, 30, 10)
+    with cb:
+        sb = st.selectbox("Sort by", ["avg_delay","congestion","max_delay","pct_ontime"])
     top = sdf.sort_values(sb, ascending=(sb=="pct_ontime")).head(top_n)
-    c1,c2 = st.columns(2)
+    c1, c2 = st.columns(2)
     with c1:
         st.subheader(f"Top {top_n} — avg delay")
         fig = px.bar(top.sort_values("avg_delay"), x="avg_delay", y="station_name",
@@ -253,13 +271,16 @@ elif page == "Station Analysis":
             c.metric("Cluster",         res['cluster'].replace(" Congestion",""))
             d.metric("RL Action",       res['rl'])
 
-# ════════════════════════════════════════════════════════════════════
 elif page == "Model Performance":
     st.title("Model Performance")
     st.subheader("Classification accuracy comparison")
-    mdf = pd.DataFrame({"Model":["XGBoost","Random Forest","Gradient Boosting"],
-                         "Accuracy":[94.2,91.5,90.8],"Precision":[93.8,91.1,90.2],
-                         "Recall":[94.2,91.5,90.8],"F1 Score":[93.9,91.2,90.4]})
+    mdf = pd.DataFrame({
+        "Model"    : ["XGBoost","Random Forest","Gradient Boosting"],
+        "Accuracy" : [94.2, 91.5, 90.8],
+        "Precision": [93.8, 91.1, 90.2],
+        "Recall"   : [94.2, 91.5, 90.8],
+        "F1 Score" : [93.9, 91.2, 90.4]
+    })
     fig = go.Figure()
     for i,(_, row) in enumerate(mdf.iterrows()):
         fig.add_trace(go.Bar(name=row["Model"],
@@ -268,22 +289,26 @@ elif page == "Model Performance":
             marker_color=["#3b82f6","#22c55e","#f59e0b"][i]))
     fig.add_hline(y=90, line_dash="dash", line_color="red", annotation_text="90% target")
     fig.update_layout(barmode="group", height=320, yaxis=dict(range=[85,100]),
-        margin=dict(t=10,b=40,l=40,r=10), legend=dict(orientation="h",yanchor="bottom",y=1.02))
+        margin=dict(t=10,b=40,l=40,r=10),
+        legend=dict(orientation="h",yanchor="bottom",y=1.02))
     st.plotly_chart(fig, use_container_width=True)
     st.markdown("---")
-    c1,c2 = st.columns(2)
+    c1, c2 = st.columns(2)
     with c1:
         st.subheader("5-Fold cross-validation")
-        cv = [93.8,94.5,92.9,94.1,93.6]
+        cv = [93.8, 94.5, 92.9, 94.1, 93.6]
         fig = go.Figure(go.Bar(x=[f"Fold {i}" for i in range(1,6)], y=cv,
-            marker_color="#3b82f6", text=[f"{s}%" for s in cv], textposition="outside"))
+            marker_color="#3b82f6",
+            text=[f"{s}%" for s in cv], textposition="outside"))
         fig.add_hline(y=np.mean(cv), line_dash="dash", line_color="red",
                       annotation_text=f"Mean: {np.mean(cv):.1f}%")
-        fig.update_layout(height=280, yaxis=dict(range=[88,98]), margin=dict(t=10,b=40,l=40,r=10))
+        fig.update_layout(height=280, yaxis=dict(range=[88,98]),
+                          margin=dict(t=10,b=40,l=40,r=10))
         st.plotly_chart(fig, use_container_width=True)
     with c2:
         st.subheader("Regression R² score")
-        fig = go.Figure(go.Indicator(mode="gauge+number+delta", value=97.2,
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number+delta", value=97.2,
             title={"text":"R² Score (%)"},
             delta={"reference":90,"increasing":{"color":"#22c55e"}},
             gauge={"axis":{"range":[0,100]},"bar":{"color":"#3b82f6"},
@@ -302,15 +327,19 @@ elif page == "Model Performance":
     st.plotly_chart(fig, use_container_width=True)
     st.markdown("---")
     st.subheader("Feature importance")
-    fi = pd.DataFrame({"Feature":["Station_Avg_Delay","Train_Avg_Delay","Right_Time_Inverse",
-        "Delay_Severity_Score","Congestion_Index","Station_Max_Delay","Delay_Risk",
-        "pct_significant_delay","Station_Std_Delay","Slight_to_Sig_Ratio",
-        "pct_right_time","pct_cancelled_unknown","Train_Count_Station","pct_slight_delay"],
-        "Importance":[0.31,0.18,0.12,0.09,0.07,0.06,0.04,0.04,0.03,0.02,0.02,0.01,0.01,0.00]
+    fi = pd.DataFrame({
+        "Feature"   : ["Station_Avg_Delay","Train_Avg_Delay","Right_Time_Inverse",
+                        "Delay_Severity_Score","Congestion_Index","Station_Max_Delay",
+                        "Delay_Risk","pct_significant_delay","Station_Std_Delay",
+                        "Slight_to_Sig_Ratio","pct_right_time","pct_cancelled_unknown",
+                        "Train_Count_Station","pct_slight_delay"],
+        "Importance": [0.31,0.18,0.12,0.09,0.07,0.06,0.04,0.04,
+                       0.03,0.02,0.02,0.01,0.01,0.00]
     }).sort_values("Importance")
     fig = px.bar(fi, x="Importance", y="Feature", orientation="h",
         color="Importance", color_continuous_scale=["#bfdbfe","#1d4ed8"])
-    fig.update_layout(height=400, margin=dict(t=10,b=40,l=10,r=10), coloraxis_showscale=False)
+    fig.update_layout(height=400, margin=dict(t=10,b=40,l=10,r=10),
+                      coloraxis_showscale=False)
     st.plotly_chart(fig, use_container_width=True)
     st.markdown("---")
     st.subheader("Model summary")
